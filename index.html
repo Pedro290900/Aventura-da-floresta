@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Aventura da Floresta</title>
+<style>
+:root{--ink:#263238;--cream:#fff8e7;--green:#27845b;--yellow:#ffd45c}
+*{box-sizing:border-box} body{margin:0;background:linear-gradient(#a9e7ff,#e7f8d6);font-family:system-ui,Arial,sans-serif;color:var(--ink);min-height:100vh;display:grid;place-items:center;padding:16px}
+.wrap{width:min(960px,100%);background:#fff9e9;border:4px solid #263238;border-radius:22px;padding:14px;box-shadow:0 9px 0 #263238}
+header{display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap;padding:4px 6px 12px}
+h1{font-size:clamp(20px,4vw,30px);margin:0;color:#17613f}.stats{display:flex;gap:8px;flex-wrap:wrap}.pill{background:#fff;border:2px solid #263238;border-radius:999px;padding:6px 12px;font-weight:800}
+.stage{position:relative}canvas{display:block;width:100%;height:auto;aspect-ratio:16/9;background:#8ed8f4;border:3px solid #263238;border-radius:14px;touch-action:none}
+.overlay{position:absolute;inset:3px;display:grid;place-items:center;background:#173d36aa;border-radius:11px;padding:18px;text-align:center;color:white}
+.panel{max-width:460px;background:#fff8e7;color:#263238;border:3px solid #263238;border-radius:18px;padding:22px;box-shadow:0 6px 0 #263238}
+.panel h2{margin:0 0 8px;color:#17613f}.panel p{line-height:1.45}.btn{border:2px solid #263238;border-radius:12px;background:#ffd45c;color:#263238;font-weight:900;padding:11px 18px;font-size:16px;cursor:pointer;box-shadow:0 4px 0 #263238}.btn:active{transform:translateY(3px);box-shadow:0 1px 0 #263238}
+.controls{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 4px 2px;flex-wrap:wrap}.help{font-size:13px;color:#42545a}.touch{display:flex;gap:9px}.touch button{width:58px;height:48px;font-size:22px;touch-action:none}
+@media(max-width:560px){.wrap{padding:9px}.help{max-width:100%}.touch button{width:52px;height:46px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<header><h1>🌿 Aventura da Floresta</h1><div class="stats"><span class="pill">🪙 <span id="coins">0</span></span><span class="pill">❤️ <span id="lives">3</span></span><span class="pill">🏁 Fase <span id="level">1</span>/3</span></div></header>
+<div class="stage">
+<canvas id="game" width="960" height="540" aria-label="Jogo Aventura da Floresta"></canvas>
+<div class="overlay" id="overlay"><div class="panel"><h2>Uma aventura espera por você!</h2><p>Ajude Léo a atravessar a floresta, coletar moedas e chegar à bandeira. Cuidado com os monstrinhos!</p><p><b>Teclado:</b> ← → ou A/D para andar · Espaço ou ↑ para pular.</p><button class="btn" id="start">Jogar agora</button></div></div>
+</div>
+<div class="controls"><div class="help">💡 Dica: pule sobre os inimigos e alcance a bandeira no fim de cada fase.</div><div class="touch"><button class="btn" id="left" aria-label="Esquerda">◀</button><button class="btn" id="jump" aria-label="Pular">⬆</button><button class="btn" id="right" aria-label="Direita">▶</button></div></div>
+</main>
+<script>
+(()=>{
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');
+const $=id=>document.getElementById(id);
+const W=960,H=540,gravity=.62;
+let state='menu',level=0,coins=0,lives=3,camera=0,keys={},touch={left:false,right:false,jump:false},player,platforms,items,enemies,goal,worldW;
+const levelData=[
+ {world:1800,ground:455,plats:[[250,370,150,18],[500,315,150,18],[760,365,145,18],[1030,300,150,18],[1320,360,150,18],[1540,300,130,18]],coins:[[285,330],[550,275],[805,325],[1080,260],[1370,320],[1580,260],[650,420],[1200,420]],foes:[[420,425],[900,425],[1450,425]]},
+ {world:2050,ground:455,plats:[[180,365,140,18],[420,300,140,18],[680,350,150,18],[950,280,150,18],[1220,340,150,18],[1510,280,150,18],[1770,350,130,18]],coins:[[220,325],[465,260],[725,310],[995,240],[1265,300],[1555,240],[1810,310],[820,420],[1400,420]],foes:[[350,425],[790,425],[1120,425],[1660,425]]},
+ {world:2300,ground:455,plats:[[220,350,140,18],[470,285,140,18],[730,340,140,18],[990,270,150,18],[1280,330,140,18],[1530,260,150,18],[1800,330,140,18],[2040,270,130,18]],coins:[[260,310],[515,245],[775,300],[1045,230],[1325,290],[1585,220],[1850,290],[2080,230],[900,420],[1700,420]],foes:[[390,425],[850,425],[1190,425],[1730,425],[1980,425]]}
+];
+function loadLevel(){const d=levelData[level];worldW=d.world;camera=0;platforms=[{x:0,y:d.ground,w:worldW,h:100},...d.plats.map(([x,y,w,h])=>({x,y,w,h}))];items=d.coins.map(([x,y])=>({x,y,r:12,taken:false}));enemies=d.foes.map(([x,y],i)=>({x,y,w:34,h:30,vx:i%2?1.3:-1.3,alive:true,origin:x,range:85}));goal={x:worldW-95,y:d.ground-78};player={x:55,y:360,w:34,h:48,vx:0,vy:0,onGround:false,face:1,inv:0};updateHud()}
+function updateHud(){$('coins').textContent=coins;$('lives').textContent=lives;$('level').textContent=level+1}
+function start(){coins=0;lives=3;level=0;loadLevel();state='play';$('overlay').style.display='none';}
+function rect(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function hit(a,b){return a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y}
+function hurt(){if(player.inv>0)return;lives--;player.inv=95;player.vy=-8;updateHud();if(lives<=0){state='over';show('Fim de jogo!','Você coletou '+coins+' moedas. Quer tentar novamente?','Jogar novamente')} }
+function show(title,msg,button){$('overlay').style.display='grid';$('overlay').innerHTML='<div class="panel"><h2>'+title+'</h2><p>'+msg+'</p><button class="btn" id="again">'+button+'</button></div>';$('again').onclick=start}
+function update(){
+ if(state!=='play')return;
+ const p=player,speed=4.4;
+ p.vx=(keys.ArrowRight||keys.KeyD||touch.right?speed:0)-(keys.ArrowLeft||keys.KeyA||touch.left?speed:0);
+ if(p.vx)p.face=Math.sign(p.vx);
+ if((keys.Space||keys.ArrowUp||keys.KeyW||touch.jump)&&p.onGround){p.vy=-13.5;p.onGround=false}
+ p.vy=Math.min(p.vy+gravity,15);
+ p.x=Math.max(0,Math.min(worldW-p.w,p.x+p.vx));
+ const oldY=p.y;p.y+=p.vy;p.onGround=false;
+ for(const b of platforms){if(hit(p,b)&&p.vy>=0&&oldY+p.h<=b.y+8){p.y=b.y-p.h;p.vy=0;p.onGround=true}}
+ if(p.y>H+100){hurt();p.y=300}
+ if(p.inv>0)p.inv--;
+ for(const c of items){if(!c.taken&&Math.hypot(p.x+p.w/2-c.x,p.y+p.h/2-c.y)<28){c.taken=true;coins++;updateHud()}}
+ for(const e of enemies){if(!e.alive)continue;e.x+=e.vx;if(Math.abs(e.x-e.origin)>e.range)e.vx*=-1;if(hit(p,e)){if(p.vy>1&&p.y+p.h-e.y<19){e.alive=false;p.vy=-9;coins+=2;updateHud()}else hurt()}}
+ if(p.x+p.w>goal.x&&p.y+p.h>goal.y){if(level<2){level++;loadLevel()}else{state='won';show('Você venceu! 🏆','Parabéns! Você terminou as três fases e fez '+coins+' moedas.','Jogar novamente')}}
+ camera=Math.max(0,Math.min(worldW-W,p.x-W*.36));
+}
+function roundRect(x,y,w,h,r,color){ctx.fillStyle=color;ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
+function draw(){
+ ctx.clearRect(0,0,W,H);
+ // céu e cenário
+ const sky=ctx.createLinearGradient(0,0,0,H);sky.addColorStop(0,'#80d9f5');sky.addColorStop(1,'#d9f5ce');ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+ for(let i=0;i<9;i++){let x=((i*180-camera*.25)%(W+180)+W+180)%(W+180)-70;ctx.fillStyle='#fff';ctx.beginPath();ctx.arc(x,95+(i%3)*35,24,0,7);ctx.arc(x+25,90+(i%3)*35,30,0,7);ctx.arc(x+52,100+(i%3)*35,21,0,7);ctx.fill()}
+ for(let i=0;i<12;i++){let x=((i*145-camera*.48)%(W+200)+W+200)%(W+200)-80;ctx.fillStyle=i%2?'#69bd75':'#82ca7b';ctx.beginPath();ctx.arc(x,420,75,Math.PI,0);ctx.fill()}
+ ctx.save();ctx.translate(-camera,0);
+ // chão e plataformas
+ for(const b of platforms){roundRect(b.x,b.y,b.w,b.h,8,'#8b5936');ctx.fillStyle='#45a85b';ctx.fillRect(b.x,b.y,b.w,9);for(let x=b.x+15;x<b.x+b.w;x+=35){ctx.fillStyle='#b77b4a';ctx.fillRect(x,b.y+22,13,4)}}
+ // moedas
+ for(const c of items){if(c.taken)continue;ctx.fillStyle='#ffd33d';ctx.strokeStyle='#b87912';ctx.lineWidth=4;ctx.beginPath();ctx.arc(c.x,c.y,12,0,7);ctx.fill();ctx.stroke();ctx.fillStyle='#fff2a6';ctx.fillRect(c.x-3,c.y-7,4,13)}
+ // bandeira
+ ctx.fillStyle='#57412e';ctx.fillRect(goal.x+14,goal.y,7,78);ctx.fillStyle='#ff5e68';ctx.beginPath();ctx.moveTo(goal.x+21,goal.y+4);ctx.lineTo(goal.x+70,goal.y+20);ctx.lineTo(goal.x+21,goal.y+37);ctx.fill();
+ // inimigos
+ for(const e of enemies){if(!e.alive)continue;roundRect(e.x,e.y,e.w,e.h,12,'#9a64ce');ctx.fillStyle='white';ctx.beginPath();ctx.arc(e.x+10,e.y+11,5,0,7);ctx.arc(e.x+24,e.y+11,5,0,7);ctx.fill();ctx.fillStyle='#263238';ctx.fillRect(e.x+9,e.y+10,3,5);ctx.fillRect(e.x+23,e.y+10,3,5);ctx.fillStyle='#633b89';ctx.fillRect(e.x+10,e.y+25,5,5);ctx.fillRect(e.x+23,e.y+25,5,5)}
+ // jogador
+ const p=player;if(p&&!(p.inv>0&&Math.floor(p.inv/5)%2===0)){roundRect(p.x,p.y+7,p.w,p.h-7,10,'#f2a34a');roundRect(p.x+3,p.y,p.w-6,25,9,'#ffd4a1');ctx.fillStyle='#4b3328';ctx.fillRect(p.x+(p.face>0?22:8),p.y+10,5,7);ctx.fillStyle='#e95e53';ctx.fillRect(p.x+6,p.y+30,22,8);ctx.fillStyle='#315b9c';ctx.fillRect(p.x+4,p.y+39,11,9);ctx.fillRect(p.x+20,p.y+39,11,9)}
+ ctx.restore();
+ // texto de ajuda
+ ctx.fillStyle='#244b3b';ctx.font='bold 15px system-ui';ctx.fillText('Explore, pule e colete!',18,28);
+}
+function loop(){update();draw();requestAnimationFrame(loop)}
+document.addEventListener('keydown',e=>{keys[e.code]=true;if(['Space','ArrowUp','ArrowLeft','ArrowRight'].includes(e.code))e.preventDefault()});
+document.addEventListener('keyup',e=>keys[e.code]=false);
+function bind(id,key){const el=$(id);el.addEventListener('pointerdown',e=>{e.preventDefault();touch[key]=true;el.setPointerCapture(e.pointerId)});['pointerup','pointercancel','lostpointercapture'].forEach(ev=>el.addEventListener(ev,()=>touch[key]=false))}
+bind('left','left');bind('right','right');bind('jump','jump');$('start').onclick=start;
+loadLevel();loop();
+})();
+</script>
+</body></html>
